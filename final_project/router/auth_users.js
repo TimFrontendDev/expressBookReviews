@@ -1,75 +1,33 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
-let books = require("./booksdb.js");
-const regd_users = express.Router();
+const session = require('express-session');
+const customer_routes = require('./router/auth_users.js').authenticated;
+const genl_routes = require('./router/general.js').general;
 
-let users = [];
+const app = express();
 
-const isValid = (username) => { // returns boolean
-  let userswithsameusername = users.filter((user) => user.username === username);
-  return userswithsameusername.length === 0;
-}
+app.use(express.json());
 
-const authenticatedUser = (username, password) => { // returns boolean
-  let validusers = users.filter((user) => {
-    return user.username === username && user.password === password;
-  });
-  return validusers.length > 0;
-}
+app.use("/customer",session({secret:"fingerprint_customer",resave: true, saveUninitialized: true}))
 
-// only registered users can login
-regd_users.post("/login", (req, res) => {
-  const username = req.body.username;
-  const password = req.body.password;
-
-  if (!username || !password) {
-    return res.status(404).json({ message: "Error logging in" });
+app.use("/customer/auth/*", function auth(req,res,next){
+  //Write the authenication mechanism here
+  if(!req.session.authorization){
+    return res.status(403).json({message: "User not logged in"})
   }
-
-  if (authenticatedUser(username, password)) {
-    let accessToken = jwt.sign(
-      {
-        data: password
-      },
-      "fingerprint_customer",
-      { expiresIn: 60 * 60 }
-    );
-
-    req.session.authorization = {
-      accessToken,
-      username
-    };
-
-    return res.status(200).send("Customer successfully logged in");
-  } else {
-    return res.status(208).json({ message: "Invalid Login. Check username and password" });
-  }
+  let token = req.session.authorization['accessToken'];
+  jwt.verify(token, "fingerprint_customer", (err, user) => {
+    if(err){
+      return res.status(403).json({message: "User not authenticated"})
+    }
+    req.user = user;
+    next();
+  })
 });
+ 
+const PORT =5000;
 
-// Add or modify a book review
-regd_users.put("/auth/review/:isbn", (req, res) => {
-  const isbn = req.params.isbn;
-  const review = req.query.review;
-  const username = req.session.authorization.username;
+app.use("/customer", customer_routes);
+app.use("/", genl_routes);
 
-  books[isbn].reviews[username] = review;
-
-  return res.status(200).json({ message: "Review successfully added/updated", books });
-});
-
-// Delete a book review
-regd_users.delete("/auth/review/:isbn", (req, res) => {
-  const isbn = req.params.isbn;
-  const username = req.session.authorization.username;
-
-  if (books[isbn] && books[isbn].reviews[username]) {
-    delete books[isbn].reviews[username];
-    return res.status(200).json({ message: "Review successfully deleted", books });
-  }
-
-  return res.status(404).json({ message: "Review not found" });
-});
-
-module.exports.authenticated = regd_users;
-module.exports.isValid = isValid;
-module.exports.users = users;
+app.listen(PORT,()=>console.log("Server is running"));
